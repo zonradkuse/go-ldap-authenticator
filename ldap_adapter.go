@@ -69,7 +69,7 @@ func (this LDAPAuthenticator) GetUserById(id string) (error, interface{}) {
 
 func (this *LDAPAuthenticator) searchForUser(uid string) (error, *ldap.Entry) {
 	if this.bindUrl == "" {
-		panic(errors.New("Connect before actually query"))
+		panic(errors.New("Connect to Server before actually running a Query."))
 	}
 
 	// The username and password we want to check
