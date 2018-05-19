@@ -27,7 +27,7 @@ func NewLDAPAuthenticator(bindDn, bindPassword, queryDn string) LDAPAuthenticato
 }
 
 func (this *LDAPAuthenticator) Connect(bindUrl string) error {
-	l, err := ldap.Dial("tcp", this.bindUrl)
+	l, err := ldap.Dial("tcp", bindUrl)
 	if err != nil {
 		return err
 	}
@@ -39,6 +39,7 @@ func (this *LDAPAuthenticator) Connect(bindUrl string) error {
 	}
 
 	this.conn = l
+	this.bindUrl = bindUrl
 
 	return nil
 }
