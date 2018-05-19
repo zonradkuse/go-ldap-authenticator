@@ -2,8 +2,8 @@ package ldap
 
 import (
 	"crypto/tls"
+	"errors"
 	"fmt"
-	"log"
 
 	"github.com/go-ldap/ldap"
 )
@@ -13,11 +13,12 @@ type LDAPAuthenticator struct {
 	bindDn       string
 	bindPassword string
 	queryDn      string
+
+	conn *ldap.Conn
 }
 
-func NewLDAPAuthenticator(bindUrl, bindDn, bindPassword, queryDn string) LDAPAuthenticator {
+func NewLDAPAuthenticator(bindDn, bindPassword, queryDn string) LDAPAuthenticator {
 	var authenticator LDAPAuthenticator
-	authenticator.bindUrl = bindUrl
 	authenticator.bindDn = bindDn
 	authenticator.bindPassword = bindPassword
 	authenticator.queryDn = queryDn
@@ -25,67 +26,79 @@ func NewLDAPAuthenticator(bindUrl, bindDn, bindPassword, queryDn string) LDAPAut
 	return authenticator
 }
 
-func (this *LDAPAuthenticator) Authenticate(username, password string) error {
-	// The username and password we want to check
-	bindusername := this.bindDn
-	bindpassword := this.bindPassword
-
+func (this *LDAPAuthenticator) Connect(bindUrl string) error {
 	l, err := ldap.Dial("tcp", this.bindUrl)
 	if err != nil {
-		log.Println(err)
 		return err
 	}
-	defer l.Close()
 
 	// Reconnect with TLS
 	err = l.StartTLS(&tls.Config{InsecureSkipVerify: true})
 	if err != nil {
-		log.Println(err)
 		return err
 	}
 
-	// First bind with a read only user
-	err = l.Bind(bindusername, bindpassword)
+	this.conn = l
+
+	return nil
+}
+
+func (this *LDAPAuthenticator) Close() {
+	this.conn.Close()
+}
+
+func (this LDAPAuthenticator) Authenticate(username, password string) (error, string) {
+	err, entry := this.searchForUser(username)
 	if err != nil {
-		log.Println(err)
-		return err
+		return err, ""
+	}
+
+	// Bind as the user to verify their password
+	userdn := entry.DN
+	err = this.conn.Bind(userdn, password)
+	if err != nil {
+		return err, ""
+	}
+
+	return nil, entry.GetAttributeValue("uid")
+}
+
+func (this LDAPAuthenticator) GetUserById(id string) (error, interface{}) {
+	return this.searchForUser(id)
+}
+
+func (this *LDAPAuthenticator) searchForUser(uid string) (error, *ldap.Entry) {
+	if this.bindUrl == "" {
+		panic(errors.New("Connect before actually query"))
+	}
+
+	// The username and password we want to check
+	bindusername := this.bindDn
+	bindpassword := this.bindPassword
+
+	// First bind with a read only user
+	err := this.conn.Bind(bindusername, bindpassword)
+	if err != nil {
+		return err, nil
 	}
 
 	// Search for the given username
 	searchRequest := ldap.NewSearchRequest(
 		this.queryDn,
 		ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0, 0, false,
-		fmt.Sprintf("(&(objectClass=organizationalPerson)(uid=%s))", username),
-		[]string{"dn"},
+		fmt.Sprintf("(&(objectClass=organizationalPerson)(uid=%s))", uid),
+		[]string{"dn", "uid"},
 		nil,
 	)
 
-	sr, err := l.Search(searchRequest)
+	sr, err := this.conn.Search(searchRequest)
 	if err != nil {
-		log.Println(err)
-		return err
+		return err, nil
 	}
 
 	if len(sr.Entries) != 1 {
-		log.Fatal("User does not exist or too many entries returned")
+		return errors.New("User does not exist or there is technically more than one."), nil
 	}
 
-	userdn := sr.Entries[0].DN
-
-	// Bind as the user to verify their password
-	err = l.Bind(userdn, password)
-	if err != nil {
-		log.Println(err)
-		return err
-	}
-
-	// Rebind as the read only user for any further queries
-	err = l.Bind(bindusername, bindpassword)
-	if err != nil {
-		log.Println(err)
-		return err
-	}
-
-	return nil
-
+	return nil, sr.Entries[0]
 }
