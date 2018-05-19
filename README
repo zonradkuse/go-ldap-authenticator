@@ -1,0 +1,4 @@
+# LDAP Authenticator
+
+This is a very simple LDAP Authenticator written in Go. It uses the example code from https://godoc.org/github.com/go-ldap/ldap
+
