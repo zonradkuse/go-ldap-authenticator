@@ -8,22 +8,33 @@ import (
 	"github.com/go-ldap/ldap"
 )
 
+type Entry = ldap.Entry
+
 type LDAPAuthenticator struct {
 	bindUrl      string
 	bindDn       string
 	bindPassword string
 	queryDn      string
+	selectors    []string
 
 	conn *ldap.Conn
+
+	ldapTransformer LDAPTransformer
 }
 
-func NewLDAPAuthenticator(bindDn, bindPassword, queryDn string) LDAPAuthenticator {
+func NewLDAPAuthenticator(bindDn, bindPassword, queryDn string, selectors []string, transformer LDAPTransformer) LDAPAuthenticator {
 	var authenticator LDAPAuthenticator
 	authenticator.bindDn = bindDn
 	authenticator.bindPassword = bindPassword
 	authenticator.queryDn = queryDn
+	authenticator.selectors = selectors
+	authenticator.ldapTransformer = transformer
 
 	return authenticator
+}
+
+func (this *LDAPAuthenticator) GetConnection() *ldap.Conn {
+	return this.conn
 }
 
 func (this *LDAPAuthenticator) Connect(bindUrl string) error {
@@ -61,11 +72,18 @@ func (this LDAPAuthenticator) Authenticate(username, password string) (error, st
 		return err, ""
 	}
 
+	defer this.bindReadUser()
+
 	return nil, entry.GetAttributeValue("uid")
 }
 
 func (this LDAPAuthenticator) GetUserById(id string) (error, interface{}) {
-	return this.searchForUser(id)
+	err, entry := this.searchForUser(id)
+	if err != nil {
+		return err, nil
+	}
+
+	return nil, this.ldapTransformer.Transform(entry)
 }
 
 func (this *LDAPAuthenticator) searchForUser(uid string) (error, *ldap.Entry) {
@@ -83,12 +101,14 @@ func (this *LDAPAuthenticator) searchForUser(uid string) (error, *ldap.Entry) {
 		return err, nil
 	}
 
+	defer this.bindReadUser()
+
 	// Search for the given username
 	searchRequest := ldap.NewSearchRequest(
 		this.queryDn,
 		ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0, 0, false,
 		fmt.Sprintf("(&(objectClass=organizationalPerson)(uid=%s))", uid),
-		[]string{"dn", "uid"},
+		append([]string{"dn", "uid"}, this.selectors...),
 		nil,
 	)
 
@@ -102,4 +122,11 @@ func (this *LDAPAuthenticator) searchForUser(uid string) (error, *ldap.Entry) {
 	}
 
 	return nil, sr.Entries[0]
+}
+
+func (this *LDAPAuthenticator) bindReadUser() {
+	bindusername := this.bindDn
+	bindpassword := this.bindPassword
+
+	this.conn.Bind(bindusername, bindpassword)
 }
