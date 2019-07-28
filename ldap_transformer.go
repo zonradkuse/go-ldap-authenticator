@@ -1,6 +1,6 @@
 package ldap
 
-// LDAPTransformer transforms a ldap Entry to a proper datastructure
-type LDAPTransformer interface {
+// Transformer transforms a ldap Entry to a proper datastructure
+type Transformer interface {
 	Transform(entry *Entry) interface{}
 }

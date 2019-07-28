@@ -8,125 +8,133 @@ import (
 	"github.com/go-ldap/ldap"
 )
 
+// Entry is a synonyme to go-ldap/ldap Entry
 type Entry = ldap.Entry
 
-type LDAPAuthenticator struct {
-	bindUrl      string
-	bindDn       string
+// Authenticator holds the connection to the LDAP server as well as a given transformer to process retrieved entries.
+type Authenticator struct {
+	bindURL      string
+	bindDN       string
 	bindPassword string
-	queryDn      string
+	queryDN      string
 	selectors    []string
 
 	conn *ldap.Conn
 
-	ldapTransformer LDAPTransformer
+	transformer Transformer
 }
 
-func NewLDAPAuthenticator(bindDn, bindPassword, queryDn string, selectors []string, transformer LDAPTransformer) LDAPAuthenticator {
-	var authenticator LDAPAuthenticator
-	authenticator.bindDn = bindDn
+// NewAuthenticator creates a new Authenticator
+func NewAuthenticator(bindDN, bindPassword, queryDN string, selectors []string, transformer Transformer) Authenticator {
+	var authenticator Authenticator
+	authenticator.bindDN = bindDN
 	authenticator.bindPassword = bindPassword
-	authenticator.queryDn = queryDn
+	authenticator.queryDN = queryDN
 	authenticator.selectors = selectors
-	authenticator.ldapTransformer = transformer
+	authenticator.transformer = transformer
 
 	return authenticator
 }
 
-func (this *LDAPAuthenticator) GetConnection() *ldap.Conn {
-	return this.conn
+// Connection returns the current ldap connection
+func (auth *Authenticator) Connection() *ldap.Conn {
+	return auth.conn
 }
 
-func (this *LDAPAuthenticator) Connect(bindUrl string) error {
-	l, err := ldap.Dial("tcp", bindUrl)
+// Connect to bindURL ldap server and upgrade to TLS
+func (auth *Authenticator) Connect(bindURL string) error {
+	l, err := ldap.DialURL(bindURL)
 	if err != nil {
 		return err
 	}
 
-	// Reconnect with TLS
+	// Upgrade connection to TLS
 	err = l.StartTLS(&tls.Config{InsecureSkipVerify: true})
 	if err != nil {
 		return err
 	}
 
-	this.conn = l
-	this.bindUrl = bindUrl
+	auth.conn = l
+	auth.bindURL = bindURL
 
 	return nil
 }
 
-func (this *LDAPAuthenticator) Close() {
-	this.conn.Close()
+// Close the ldap connection
+func (auth *Authenticator) Close() {
+	auth.conn.Close()
 }
 
-func (this LDAPAuthenticator) Authenticate(username, password string) (error, string) {
-	err, entry := this.searchForUser(username)
+// Authenticate a user with username and passwort with given ldap server and return its uid
+func (auth Authenticator) Authenticate(username, password string) (string, error) {
+	entry, err := auth.searchForUser(username)
 	if err != nil {
-		return err, ""
+		return "", err
 	}
 
 	// Bind as the user to verify their password
 	userdn := entry.DN
-	err = this.conn.Bind(userdn, password)
+	err = auth.conn.Bind(userdn, password)
 	if err != nil {
-		return err, ""
+		return "", err
 	}
 
-	defer this.bindReadUser()
+	defer auth.bindReadUser()
 
-	return nil, entry.GetAttributeValue("uid")
+	return entry.GetAttributeValue("uid"), nil
 }
 
-func (this LDAPAuthenticator) GetUserById(id string) (error, interface{}) {
-	err, entry := this.searchForUser(id)
+// GetUserByID searches for the given user id and returns it if there is such a user.
+func (auth Authenticator) GetUserByID(id string) (interface{}, error) {
+	entry, err := auth.searchForUser(id)
 	if err != nil {
-		return err, nil
+		return nil, err
 	}
 
-	return nil, this.ldapTransformer.Transform(entry)
+	return auth.transformer.Transform(entry), nil
 }
 
-func (this *LDAPAuthenticator) searchForUser(uid string) (error, *ldap.Entry) {
-	if this.bindUrl == "" {
-		panic(errors.New("Connect to Server before actually running a Query."))
+func (auth *Authenticator) searchForUser(uid string) (*ldap.Entry, error) {
+	if auth.bindURL == "" {
+		panic(errors.New("Connect to Server before actually running a Query"))
 	}
 
 	// The username and password we want to check
-	bindusername := this.bindDn
-	bindpassword := this.bindPassword
+	bindusername := auth.bindDN
+	bindpassword := auth.bindPassword
 
 	// First bind with a read only user
-	err := this.conn.Bind(bindusername, bindpassword)
+	err := auth.conn.Bind(bindusername, bindpassword)
 	if err != nil {
-		return err, nil
+		return nil, err
 	}
 
-	defer this.bindReadUser()
+	defer auth.bindReadUser()
 
 	// Search for the given username
 	searchRequest := ldap.NewSearchRequest(
-		this.queryDn,
+		auth.queryDN,
 		ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0, 0, false,
 		fmt.Sprintf("(&(objectClass=organizationalPerson)(uid=%s))", uid),
-		append([]string{"dn", "uid"}, this.selectors...),
+		append([]string{"dn", "uid"}, auth.selectors...),
 		nil,
 	)
 
-	sr, err := this.conn.Search(searchRequest)
+	sr, err := auth.conn.Search(searchRequest)
 	if err != nil {
-		return err, nil
+		return nil, err
 	}
 
 	if len(sr.Entries) != 1 {
-		return errors.New("User does not exist or there is technically more than one."), nil
+		return nil, errors.New("User does not exist or there is technically more than one")
 	}
 
-	return nil, sr.Entries[0]
+	return sr.Entries[0], nil
 }
 
-func (this *LDAPAuthenticator) bindReadUser() {
-	bindusername := this.bindDn
-	bindpassword := this.bindPassword
+func (auth *Authenticator) bindReadUser() {
+	bindusername := auth.bindDN
+	bindpassword := auth.bindPassword
 
-	this.conn.Bind(bindusername, bindpassword)
+	auth.conn.Bind(bindusername, bindpassword)
 }
