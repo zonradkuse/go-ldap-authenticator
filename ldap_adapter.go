@@ -25,13 +25,15 @@ type Authenticator struct {
 }
 
 // NewAuthenticator creates a new Authenticator
-func NewAuthenticator(bindDN, bindPassword, queryDN string, selectors []string, transformer Transformer) Authenticator {
+func NewAuthenticator(bindDN, bindPassword, queryDN string, transformer Transformer) Authenticator {
 	var authenticator Authenticator
+
 	authenticator.bindDN = bindDN
 	authenticator.bindPassword = bindPassword
 	authenticator.queryDN = queryDN
-	authenticator.selectors = selectors
 	authenticator.transformer = transformer
+
+	authenticator.selectors = transformer.Selectors()
 
 	return authenticator
 }
@@ -114,11 +116,14 @@ func (auth *Authenticator) searchForUser(uid string) (*ldap.Entry, error) {
 	// Search for the given username
 	searchRequest := ldap.NewSearchRequest(
 		auth.queryDN,
-		ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0, 0, false,
+		ldap.ScopeWholeSubtree,
+		ldap.NeverDerefAliases,
+		0,
+		0,
+		false,
 		fmt.Sprintf("(&(objectClass=organizationalPerson)(uid=%s))", uid),
-		append([]string{"dn", "uid"}, auth.selectors...),
-		nil,
-	)
+		auth.selectors,
+		nil)
 
 	sr, err := auth.conn.Search(searchRequest)
 	if err != nil {
