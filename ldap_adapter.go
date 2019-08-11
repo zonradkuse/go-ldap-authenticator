@@ -40,6 +40,13 @@ func NewAuthenticator(bindDN, bindPassword, queryDN string, transformer Transfor
 
 // Connection returns the current ldap connection
 func (auth *Authenticator) Connection() *ldap.Conn {
+	if auth.conn.IsClosing() {
+		if err := auth.Connect(auth.bindURL); err != nil {
+			// could not reconnect automatically.
+			panic(err)
+		}
+	}
+
 	return auth.conn
 }
 
@@ -64,7 +71,7 @@ func (auth *Authenticator) Connect(bindURL string) error {
 
 // Close the ldap connection
 func (auth *Authenticator) Close() {
-	auth.conn.Close()
+	auth.Connection().Close()
 }
 
 // Authenticate a user with username and passwort with given ldap server and return its uid
@@ -76,7 +83,7 @@ func (auth Authenticator) Authenticate(username, password string) (string, error
 
 	// Bind as the user to verify their password
 	userdn := entry.DN
-	err = auth.conn.Bind(userdn, password)
+	err = auth.Connection().Bind(userdn, password)
 	if err != nil {
 		return "", err
 	}
@@ -106,7 +113,7 @@ func (auth *Authenticator) searchForUser(uid string) (*ldap.Entry, error) {
 	bindpassword := auth.bindPassword
 
 	// First bind with a read only user
-	err := auth.conn.Bind(bindusername, bindpassword)
+	err := auth.Connection().Bind(bindusername, bindpassword)
 	if err != nil {
 		return nil, err
 	}
@@ -125,7 +132,7 @@ func (auth *Authenticator) searchForUser(uid string) (*ldap.Entry, error) {
 		auth.selectors,
 		nil)
 
-	sr, err := auth.conn.Search(searchRequest)
+	sr, err := auth.Connection().Search(searchRequest)
 	if err != nil {
 		return nil, err
 	}
@@ -141,5 +148,5 @@ func (auth *Authenticator) bindReadUser() {
 	bindusername := auth.bindDN
 	bindpassword := auth.bindPassword
 
-	auth.conn.Bind(bindusername, bindpassword)
+	auth.Connection().Bind(bindusername, bindpassword)
 }
